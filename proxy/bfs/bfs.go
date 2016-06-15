@@ -126,6 +126,7 @@ func (b *Bfs) Upload(bucket, filename, mine, sha1 string, buf []byte) (err error
 	params.Set("filename", filename)
 	params.Set("mine", mine)
 	params.Set("sha1", sha1)
+	params.Set("filesize", strconv.FormatInt(int64(len(buf)), 10))
 	uri = fmt.Sprintf(_directoryUploadApi, b.c.BfsAddr)
 	if err = Http("POST", uri, params, nil, &res); err != nil {
 		return

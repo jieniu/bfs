@@ -2,14 +2,24 @@ PprofEnable = true
 
 PprofListen = "localhost:2231"
 
-HttpAddr = "localhost:2232"
+HttpAddr = "10.10.191.7:2232"
 
-BfsAddr = "localhost:2235"
+BfsAddr = "localhost:6065"
 
-Domain = "http://localhost:2232/"                                                                              
+Domain = "http://10.10.191.7:2232/"                                                                              
 
-Prefix = "/bfs/"
+Prefix = "/xfs/"
 
 MaxFileSize = 20971520
 
 PurgeMaxSize = 100000
+
+[redis]
+# redis address
+Addr = "localhost:6379"
+
+# max idle connection in pool
+MaxIdle = 100
+
+# idle timeout (seconds)
+Timeout = 240

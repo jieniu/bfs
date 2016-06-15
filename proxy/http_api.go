@@ -2,10 +2,12 @@ package main
 
 import (
 	"bfs/libs/errors"
+	"bfs/libs/meta"
 	"bfs/proxy/auth"
 	"bfs/proxy/bfs"
 	ibucket "bfs/proxy/bucket"
 	"bfs/proxy/conf"
+	"bfs/proxy/redis_c"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -26,10 +28,11 @@ const (
 )
 
 type server struct {
-	bfs    *bfs.Bfs
-	bucket *ibucket.Bucket
-	auth   *auth.Auth
-	c      *conf.Config
+	bfs     *bfs.Bfs
+	bucket  *ibucket.Bucket
+	auth    *auth.Auth
+	c       *conf.Config
+	redis_c *redis_c.RedisClient
 }
 
 // StartApi init the http module.
@@ -37,6 +40,10 @@ func StartApi(c *conf.Config) (err error) {
 	var s = &server{}
 	s.c = c
 	s.bfs = bfs.New(c)
+	s.redis_c = redis_c.NewRedisClient()
+	if err = redis_c.Init(c); err != nil {
+		return
+	}
 	if s.bucket, err = ibucket.New(); err != nil {
 		return
 	}
@@ -76,9 +83,10 @@ func (s *server) do(wr http.ResponseWriter, r *http.Request) {
 	)
 	switch r.Method {
 	case "HEAD", "GET":
+		// TODO get filesize or download file
 		h = s.download
 		read = true
-	case "PUT":
+	case "PUT", "POST":
 		h = s.upload
 		upload = true
 	case "DELETE":
@@ -164,33 +172,110 @@ func (s *server) getURI(bucket, file string) (uri string) {
 // download.
 func (s *server) download(item *ibucket.Item, bucket, file string, wr http.ResponseWriter, r *http.Request) {
 	var (
-		data   []byte
-		err    error
-		start  = time.Now()
-		status = http.StatusOK
+		data     []byte
+		err      error
+		start    = time.Now()
+		status   = http.StatusOK
+		ind      int
+		method   int
+		filename string
 	)
 	defer httpLog("download", r.URL.Path, &bucket, &file, start, &status, &err)
-	if data, err = s.bfs.Get(bucket, file); err != nil {
-		if err == errors.ErrNeedleNotExist {
-			status = http.StatusNotFound
-		} else {
-			status = http.StatusInternalServerError
-		}
+
+	ind = strings.Index(file, "/")
+	if ind < 0 {
+		log.Errorf("bad url, %s", file)
+		status = http.StatusBadRequest
 		http.Error(wr, "", status)
-	} else {
-		wr.Header().Set("Content-Type", http.DetectContentType(data))
-		wr.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		wr.Header().Set("Server", "bfs")
-		if r.Method == "GET" {
-			_, err = wr.Write(data)
-		}
+		return
 	}
+	if method, err = strconv.Atoi(file[:ind]); err != nil {
+		status = http.StatusBadRequest
+		log.Errorf("str atoi error, %v", err)
+		http.Error(wr, "", status)
+		return
+	}
+	filename = file[ind+1:]
+
+	// 0 = get size; 1 = get content
+	if method == 0 {
+		var f *meta.File
+		var result = make(map[string]interface{})
+		var byteJson []byte
+		if f, err = s.redis_c.GetFile(bucket, filename); err != nil {
+			if err == errors.ErrNeedleNotExist {
+				status = http.StatusNotFound
+				http.Error(wr, "", status)
+				return
+			} else {
+				log.Errorf("redis get meta failed, %v", err)
+				status = http.StatusInternalServerError
+				http.Error(wr, "", status)
+				return
+			}
+		}
+		result["filesize"] = f.Filesize
+		if byteJson, err = json.Marshal(result); err != nil {
+			log.Error("json.Marshal(%v) failed (%v)", result, err)
+			return
+		}
+		wr.Header().Set("Code", strconv.Itoa(status))
+		wr.Header().Set("Content-Type", "application/json;charset=utf-8")
+		_, err = wr.Write(byteJson)
+
+	} else if method == 1 {
+		if data, err = s.bfs.Get(bucket, filename); err != nil {
+			if err == errors.ErrNeedleNotExist {
+				status = http.StatusNotFound
+			} else {
+				status = http.StatusInternalServerError
+			}
+			http.Error(wr, "", status)
+		} else {
+			wr.Header().Set("Content-Type", http.DetectContentType(data))
+			wr.Header().Set("Content-Length", strconv.Itoa(len(data)))
+			wr.Header().Set("Server", "xfs")
+			wr.Header().Set("Code", strconv.Itoa(status))
+			if r.Method == "GET" {
+				_, err = wr.Write(data)
+			}
+		}
+	} else {
+		status = http.StatusBadRequest
+		log.Errorf("method invalid %d", method)
+		http.Error(wr, "", status)
+		return
+	}
+
 	return
 }
 
 // ret reponse header.
-func retCode(wr http.ResponseWriter, status *int) {
+func retCode(wr http.ResponseWriter, status *int, reterr *error) {
+	var (
+		result   map[string]interface{}
+		byteJson []byte
+		err      error
+	)
+	result = make(map[string]interface{})
+	result["ret"] = *status
+	result["msg"] = string("ok")
+	if *reterr != nil {
+		result["msg"] = (*reterr).Error()
+	}
+	if byteJson, err = json.Marshal(result); err != nil {
+		log.Error("json.Marshal(%v) failed (%v)", result, err)
+		return
+	}
 	wr.Header().Set("Code", strconv.Itoa(*status))
+	wr.Header().Set("Content-Type", "application/json;charset=utf-8")
+
+	wr.WriteHeader(*status)
+	if _, err = wr.Write(byteJson); err != nil {
+		log.Errorf("http write error %v", err)
+		return
+	}
+	log.Infof("ret code status %v", *status)
 }
 
 // upload upload file.
@@ -209,7 +294,7 @@ func (s *server) upload(item *ibucket.Item, bucket, file string, wr http.Respons
 		start    = time.Now()
 	)
 	defer httpLog("upload", r.URL.Path, &bucket, &file, start, &status, &err)
-	defer retCode(wr, &status)
+	defer retCode(wr, &status, &err)
 	if mine = r.Header.Get("Content-Type"); mine == "" {
 		status = http.StatusBadRequest
 		return
@@ -260,7 +345,7 @@ func (s *server) delete(item *ibucket.Item, bucket, file string, wr http.Respons
 	if err = s.bfs.Delete(bucket, file); err != nil {
 		if err == errors.ErrNeedleNotExist {
 			status = http.StatusNotFound
-			http.Error(wr, "", status)
+			//http.Error(wr, "", status)
 		} else {
 			if uerr, ok = (err).(errors.Error); ok {
 				status = int(uerr)
@@ -271,6 +356,7 @@ func (s *server) delete(item *ibucket.Item, bucket, file string, wr http.Respons
 	} else {
 		wr.Header().Set("Code", strconv.Itoa(status))
 	}
+	retCode(wr, &status, &err)
 	return
 }
 

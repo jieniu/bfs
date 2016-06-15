@@ -59,7 +59,7 @@ func New() (b *Bucket, err error) {
 	// bucket test
 	item = new(Item)
 	item.Name = "test"
-	item.property = _privateWrite
+	item.property = _public
 	item.KeyId = "221bce6492eba70f"
 	item.KeySecret = "6eb80603e85842542f9736eb13b7e3"
 	item.PurgeCDN = false

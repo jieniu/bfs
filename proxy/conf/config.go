@@ -13,6 +13,7 @@ import (
 type Config struct {
 	PprofEnable bool
 	PprofListen string
+	Redis       *Redis
 
 	// api
 	HttpAddr string
@@ -26,6 +27,12 @@ type Config struct {
 	MaxFileSize int
 	// purge channel
 	PurgeMaxSize int
+}
+
+type Redis struct {
+	Addr    string
+	MaxIdle int
+	Timeout int
 }
 
 // Code to implement the TextUnmarshaler interface for `duration`:

@@ -28,7 +28,7 @@ def bfsopsInitPost():
 		dirs = list(set(request.json['dirs'].split(',')))
 		size_G = int(parseSize(request.json['size']))
 	except BaseException, e:
-		logger.warn('Exception:%s', str(e))  # xxx
+		logger.warn('Exception:%s' % str(e))  # xxx
 		abort(400)
 
 	try:
@@ -90,7 +90,7 @@ def bfsopsGroupsPost():
 	resp['status'] = "ok"
 	resp['errorMsg'] = ""
 	resp['content'] = []
-	
+
 	need_break = False
 	try:
 		ips = list(set(request.json['ips'].split(',')))
@@ -178,15 +178,20 @@ def bfsopsGroupsGet():
 def bfsopsVolumesPost():
 	if not request.json:
 		abort(400)
-	groups = list(set(request.json['groups']))
+	try:
+		groups = list(set(request.json['groups'].split(",")))
+	except BaseException, e:
+		logger.warn('Exception: %s', str(e))
+		abort(400)
 	for group_id in groups:
 		if not GROUP_STORE.has_key(group_id.encode('utf-8')):
+			logger.warn('group %d not in groups' % group_id)	
 			abort(400)
 
 	resp = {}
 	resp['status'] = "ok"
 	resp['errorMsg'] = ""
-	
+
 	need_break = False
 	global MAX_VOLUME_ID
 	for group_id_u in groups:
