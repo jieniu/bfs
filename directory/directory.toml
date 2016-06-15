@@ -13,7 +13,7 @@ PprofListen = "localhost:6066"
 [snowflake]
 # zookeeper cluster addrs, multiple addrs split by ",".
 ZkAddrs = [
-    "localhost:2181"
+    "localhost:2183"
 ]
 
 # path
@@ -28,7 +28,7 @@ WorkId = 0
 [zookeeper]
 # zookeeper cluster addrs, multiple addrs split by ",".
 Addrs = [
-    "localhost:2181"
+    "localhost:2183"
 ]
 
 # zookeeper heartbeat timeout.
@@ -58,3 +58,13 @@ MaxIdle = 100
 
 # Note that you must specify a number here.
 Timeout = "1s"
+
+[redis]
+# redis address
+Addr = "localhost:6379"
+
+# max idle connection in pool
+MaxIdle = 100
+
+# idle timeout (seconds)
+Timeout = 240

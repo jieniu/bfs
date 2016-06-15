@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	log "github.com/golang/glog"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -104,6 +105,10 @@ func (s *server) upload(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.Mine = r.FormValue("mine"); f.Mine == "" {
+		http.Error(wr, "bad request", http.StatusBadRequest)
+		return
+	}
+	if f.Filesize, err = strconv.ParseInt(r.FormValue("filesize"), 10, 64); err != nil {
 		http.Error(wr, "bad request", http.StatusBadRequest)
 		return
 	}

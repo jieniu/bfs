@@ -218,10 +218,12 @@ func (p *THBaseServiceClient) sendExists(table []byte, tget *TGet) (err error) {
 	if err = oprot.WriteMessageEnd(); err != nil {
 		return
 	}
+	fmt.Printf("sendExists\n")
 	return oprot.Flush()
 }
 
 func (p *THBaseServiceClient) recvExists() (value bool, err error) {
+	fmt.Printf("recvExists\n")
 	iprot := p.InputProtocol
 	if iprot == nil {
 		iprot = p.ProtocolFactory.GetProtocol(p.Transport)

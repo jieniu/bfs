@@ -2,7 +2,8 @@ package main
 
 import (
 	"bfs/directory/conf"
-	"bfs/directory/hbase"
+	//"bfs/directory/hbase"
+	"bfs/directory/redis_c"
 	"bfs/directory/snowflake"
 	myzk "bfs/directory/zk"
 	"bfs/libs/errors"
@@ -33,9 +34,9 @@ type Directory struct {
 	volume      map[int32]*meta.VolumeState // volume_id:volume_state
 	volumeStore map[int32][]string          // volume_id:store_server_id
 
-	genkey     *snowflake.Genkey  // snowflake client for gen key
-	hBase      *hbase.HBaseClient // hBase client
-	dispatcher *Dispatcher        // dispatch for write or read reqs
+	genkey     *snowflake.Genkey // snowflake client for gen key
+	redis_c    *redis_c.RedisClient
+	dispatcher *Dispatcher // dispatch for write or read reqs
 
 	config *conf.Config
 	zk     *myzk.Zookeeper
@@ -51,10 +52,10 @@ func NewDirectory(config *conf.Config) (d *Directory, err error) {
 	if d.genkey, err = snowflake.NewGenkey(config.Snowflake.ZkAddrs, config.Snowflake.ZkPath, config.Snowflake.ZkTimeout.Duration, config.Snowflake.WorkId); err != nil {
 		return
 	}
-	if err = hbase.Init(config); err != nil {
+	d.redis_c = redis_c.NewRedisClient()
+	if err = redis_c.Init(config); err != nil {
 		return
 	}
-	d.hBase = hbase.NewHBaseClient()
 	d.dispatcher = NewDispatcher()
 	go d.SyncZookeeper()
 	return
@@ -240,10 +241,10 @@ func (d *Directory) GetStores(bucket, filename string) (n *meta.Needle, stores [
 		storeMeta *meta.Store
 		ok        bool
 	)
-	if n, err = d.hBase.Get(bucket, filename); err != nil {
-		log.Errorf("hBase.Get error(%v)", err)
+	if n, err = d.redis_c.Get(bucket, filename); err != nil {
+		log.Errorf("redis_c.Get error(%v)", err)
 		if err != errors.ErrNeedleNotExist {
-			err = errors.ErrHBase
+			err = errors.ErrRedis
 		}
 		return
 	}
@@ -307,10 +308,10 @@ func (d *Directory) UploadStores(bucket string, f *meta.File) (n *meta.Needle, s
 	n.Vid = vid
 	n.Cookie = d.cookie()
 	f.Key = key
-	if err = d.hBase.Put(bucket, f, n); err != nil {
+	if err = d.redis_c.Put(bucket, f, n); err != nil {
 		if err != errors.ErrNeedleExist {
-			log.Errorf("hBase.Put error(%v)", err)
-			err = errors.ErrHBase
+			log.Errorf("redis.Put error(%v)", err)
+			err = errors.ErrRedis
 		}
 	}
 	return
@@ -324,7 +325,7 @@ func (d *Directory) DelStores(bucket, filename string) (n *meta.Needle, stores [
 		svrs      []string
 		storeMeta *meta.Store
 	)
-	if n, err = d.hBase.Get(bucket, filename); err != nil {
+	if n, err = d.redis_c.Get(bucket, filename); err != nil {
 		log.Errorf("hBase.Get error(%v)", err)
 		if err != errors.ErrNeedleNotExist {
 			err = errors.ErrHBase
@@ -351,9 +352,9 @@ func (d *Directory) DelStores(bucket, filename string) (n *meta.Needle, stores [
 		}
 		stores = append(stores, storeMeta.Api)
 	}
-	if err = d.hBase.Del(bucket, filename); err != nil {
-		log.Errorf("hBase.Del error(%v)", err)
-		err = errors.ErrHBase
+	if err = d.redis_c.Del(bucket, filename); err != nil {
+		log.Errorf("redis.Del error(%v)", err)
+		err = errors.ErrRedis
 	}
 	return
 }

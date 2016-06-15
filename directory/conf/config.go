@@ -11,6 +11,7 @@ type Config struct {
 	Snowflake *Snowflake
 	Zookeeper *Zookeeper
 	HBase     *HBase
+	Redis     *Redis
 
 	MaxNum      int
 	ApiListen   string
@@ -40,6 +41,12 @@ type HBase struct {
 	MaxIdle    int
 	Timeout    duration
 	LvsTimeout duration
+}
+
+type Redis struct {
+	Addr    string
+	MaxIdle int
+	Timeout int
 }
 
 // Code to implement the TextUnmarshaler interface for `duration`:

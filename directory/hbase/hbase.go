@@ -56,6 +56,7 @@ func (h *HBaseClient) Get(bucket, filename string) (n *meta.Needle, err error) {
 // Put put file and needle into hbase
 func (h *HBaseClient) Put(bucket string, f *meta.File, n *meta.Needle) (err error) {
 	if err = h.putFile(bucket, f); err != nil {
+		log.Warningf("hbase putFile error, bucket: %s, filename: %s", bucket, f.Filename)
 		return
 	}
 	if err = h.putNeedle(n); err != errors.ErrNeedleExist && err != nil {
@@ -255,6 +256,7 @@ func (h *HBaseClient) putFile(bucket string, f *meta.File) (err error) {
 	}
 	ks = []byte(f.Filename)
 	if exist, err = c.Exists(h.tableName(bucket), &hbasethrift.TGet{Row: ks}); err != nil {
+		log.Errorf("hbase Exists error, %v", err)
 		hbasePool.Put(c, true)
 		return
 	}
@@ -295,6 +297,7 @@ func (h *HBaseClient) putFile(bucket string, f *meta.File) (err error) {
 			},
 		},
 	}); err != nil {
+		log.Errorf("hbase Put error (%v)", err)
 		hbasePool.Put(c, true)
 		return
 	}
