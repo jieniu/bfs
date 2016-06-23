@@ -7,4 +7,5 @@ type File struct {
 	Mine     string `json:"mine"`
 	Status   int32  `json:"status"`
 	Filesize int64  `json:"filesize"`
+	MTime    int64  `json:"update_time"`
 }
