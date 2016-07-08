@@ -17,7 +17,7 @@
 package snowflake
 
 import (
-	log "code.google.com/p/log4go"
+	log "github.com/golang/glog"
 	"encoding/json"
 	"errors"
 	myrpc "github.com/Terry-Mao/gosnowflake/rpc"
@@ -66,14 +66,14 @@ func Init(zservers []string, zpath string, ztimeout time.Duration) (err error) {
 	zkTimeout = ztimeout
 	conn, session, err := zk.Connect(zkServers, zkTimeout)
 	if err != nil {
-		log.Error("zk.Connect(\"%v\", %d) error(%v)", zkServers, zkTimeout, err)
+		log.Errorf("zk.Connect(\"%v\", %d) error(%v)", zkServers, zkTimeout, err)
 		return
 	}
 	zkConn = conn
 	go func() {
 		for {
 			event := <-session
-			log.Info("zk connect get a event: %s", event.Type.String())
+			log.Infof("zk connect get a event: %s", event.Type.String())
 		}
 	}()
 	return
@@ -118,7 +118,7 @@ func (c *Client) Id() (id int64, err error) {
 		return
 	}
 	if err = client.Call(RPCNextId, c.workerId, &id); err != nil {
-		log.Error("rpc.Call(\"%s\", %d, &id) error(%v)", RPCNextId, c.workerId, err)
+		log.Errorf("rpc.Call(\"%s\", %d, &id) error(%v)", RPCNextId, c.workerId, err)
 	}
 	return
 }
@@ -130,7 +130,7 @@ func (c *Client) Ids(num int) (ids []int64, err error) {
 		return
 	}
 	if err = client.Call(RPCNextIds, &myrpc.NextIdsArgs{WorkerId: c.workerId, Num: num}, &ids); err != nil {
-		log.Error("rpc.Call(\"%s\", %d, &id) error(%v)", RPCNextId, c.workerId, err)
+		log.Errorf("rpc.Call(\"%s\", %d, &id) error(%v)", RPCNextId, c.workerId, err)
 	}
 	return
 }
@@ -141,7 +141,7 @@ func closeRpc(clients []*rpc.Client, stop chan bool) {
 	for _, client := range clients {
 		if client != nil {
 			if err := client.Close(); err != nil {
-				log.Error("client.Close() error(%v)", err)
+				log.Errorf("client.Close() error(%v)", err)
 			}
 		}
 	}
@@ -174,16 +174,16 @@ func (c *Client) client() (*rpc.Client, error) {
 // watchWorkerId watch the zk node change.
 func (c *Client) watchWorkerId(workerId int64, workerIdStr string) {
 	workerIdPath := path.Join(zkPath, workerIdStr)
-	log.Debug("workerIdPath: %s", workerIdPath)
+	log.Infof("workerIdPath: %s", workerIdPath)
 	for {
 		rpcs, _, watch, err := zkConn.ChildrenW(workerIdPath)
 		if err != nil {
-			log.Error("zkConn.ChildrenW(%s) error(%v)", workerIdPath, err)
+			log.Errorf("zkConn.ChildrenW(%s) error(%v)", workerIdPath, err)
 			time.Sleep(zkNodeDelaySleep)
 			continue
 		}
 		if len(rpcs) == 0 {
-			log.Error("zkConn.ChildrenW(%s) no nodes", workerIdPath)
+			log.Errorf("zkConn.ChildrenW(%s) no nodes", workerIdPath)
 			time.Sleep(zkNodeDelaySleep)
 			continue
 		}
@@ -191,20 +191,20 @@ func (c *Client) watchWorkerId(workerId int64, workerIdStr string) {
 		sort.Strings(rpcs)
 		newLeader := rpcs[0]
 		if c.leader == newLeader {
-			log.Info("workerId: %s add a new standby gosnowflake node", workerIdStr)
+			log.Infof("workerId: %s add a new standby gosnowflake node", workerIdStr)
 		} else {
-			log.Info("workerId: %s oldLeader: \"%s\", newLeader: \"%s\" not equals, continue leader selection", workerIdStr, c.leader, newLeader)
+			log.Infof("workerId: %s oldLeader: \"%s\", newLeader: \"%s\" not equals, continue leader selection", workerIdStr, c.leader, newLeader)
 			// get new leader info
 			workerNodePath := path.Join(zkPath, workerIdStr, newLeader)
 			bs, _, err := zkConn.Get(workerNodePath)
 			if err != nil {
-				log.Error("zkConn.Get(%s) error(%v)", workerNodePath, err)
+				log.Errorf("zkConn.Get(%s) error(%v)", workerNodePath, err)
 				time.Sleep(zkNodeDelaySleep)
 				continue
 			}
 			peer := &Peer{}
 			if err = json.Unmarshal(bs, peer); err != nil {
-				log.Error("json.Unmarshal(%s, peer) error(%v)", string(bs), err)
+				log.Errorf("json.Unmarshal(%s, peer) error(%v)", string(bs), err)
 				time.Sleep(zkNodeDelaySleep)
 				continue
 			}
@@ -214,7 +214,7 @@ func (c *Client) watchWorkerId(workerId int64, workerIdStr string) {
 			for i, addr := range peer.RPC {
 				clt, err := rpc.Dial("tcp", addr)
 				if err != nil {
-					log.Error("rpc.Dial(tcp, \"%s\") error(%v)", addr, err)
+					log.Errorf("rpc.Dial(tcp, \"%s\") error(%v)", addr, err)
 					continue
 				}
 				tmpClients[i] = clt
@@ -234,7 +234,7 @@ func (c *Client) watchWorkerId(workerId int64, workerIdStr string) {
 		}
 		// new zk event
 		event := <-watch
-		log.Error("zk node(\"%s\") changed %s", workerIdPath, event.Type.String())
+		log.Errorf("zk node(\"%s\") changed %s", workerIdPath, event.Type.String())
 	}
 }
 
@@ -242,7 +242,7 @@ func (c *Client) watchWorkerId(workerId int64, workerIdStr string) {
 func (c *Client) pingAndRetry(stop <-chan bool, client *rpc.Client, addr string) {
 	defer func() {
 		if err := client.Close(); err != nil {
-			log.Error("client.Close() error(%v)", err)
+			log.Errorf("client.Close() error(%v)", err)
 		}
 	}()
 	var (
@@ -254,13 +254,13 @@ func (c *Client) pingAndRetry(stop <-chan bool, client *rpc.Client, addr string)
 	for {
 		select {
 		case <-stop:
-			log.Info("addr: \"%s\" pingAndRetry goroutine exit", addr)
+			log.Infof("addr: \"%s\" pingAndRetry goroutine exit", addr)
 			return
 		default:
 		}
 		if !failed {
 			if err = client.Call(RPCPing, 0, &status); err != nil {
-				log.Error("client.Call(%s) error(%v)", RPCPing, err)
+				log.Errorf("client.Call(%s) error(%v)", RPCPing, err)
 				failed = true
 				continue
 			} else {
@@ -270,12 +270,12 @@ func (c *Client) pingAndRetry(stop <-chan bool, client *rpc.Client, addr string)
 			}
 		}
 		if tmp, err = rpc.Dial("tcp", addr); err != nil {
-			log.Error("rpc.Dial(tcp, %s) error(%v)", addr, err)
+			log.Errorf("rpc.Dial(tcp, %s) error(%v)", addr, err)
 			time.Sleep(rpcClientRetrySleep)
 			continue
 		}
 		client = tmp
 		failed = false
-		log.Info("client reconnect %s ok", addr)
+		log.Infof("client reconnect %s ok", addr)
 	}
 }

@@ -12,7 +12,9 @@ from flask import request,render_template,jsonify,session,redirect,url_for,abort
 @app.route('/bfsops/initialization', methods = ["POST"])
 #@login_required
 def bfsopsInitPost():
+	logger.info("bfsopsInitPost")
 	if not request.json:
+		logger.warn("not request.json")
 		abort(400)
 
 	try:
@@ -36,8 +38,7 @@ def bfsopsInitPost():
 					if result['succeed'] >= num_volumes -1:
 						logger.info('storeAddFreeVolume() called, success    store_ip: %s,  base_dir: %s', store_ip, store_dir)
 					else:
-						logger.warn('storeAddFreeVolume() called, success, but not enough space  store_ip: %s,  base_dir: %s',
-						 store_ip, store_dir)
+						logger.warn('storeAddFreeVolume() called, success, but not enough space  store_ip: %s,  base_dir: %s', store_ip, store_dir)
 					STORE_INFO[FREE_VOLUME_KEY+IP_TO_STORE[store_ip]] += result['succeed']
 				else:
 					logger.error('storeAddFreeVolume() called, failed    store_ip: %s,  base_dir: %s', store_ip, store_dir)
@@ -176,8 +177,8 @@ def bfsopsVolumesPost():
 		logger.warn('Exception: %s', str(e))
 		abort(400)
 	for group_id in groups:
-		if not GROUP_STORE.has_key(group_id.encode('utf-8')):
-			logger.warn('group %d not in groups' % group_id)	
+		if not GROUP_STORE.has_key(group_id):
+			logger.warn('group %s not in groups' % group_id)	
 			abort(400)
 
 	resp = {}
@@ -185,7 +186,7 @@ def bfsopsVolumesPost():
 	resp['errorMsg'] = ""
 
 	need_break = False
-    global MAX_VOLUME_ID
+	global MAX_VOLUME_ID
 	for group_id_u in groups:
 		group_id = group_id_u.encode('utf-8')
 		stores = GROUP_STORE[group_id]

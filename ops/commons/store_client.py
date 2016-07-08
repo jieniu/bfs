@@ -61,8 +61,9 @@ def genStoreConn(store_ip, store_port):
 def storeAddFreeVolume(store_ip, base_dir, num_volumes):
     if num_volumes <= 0:
         return None
-    print store_ip    
-    store_conn = genStoreConn(store_ip, config.store_admin_port)
+    
+    port = config.store_admin_port
+    store_conn = genStoreConn(store_ip, port)
     url = "/add_free_volume"
     value = {}
     value['n'] = num_volumes
@@ -83,7 +84,8 @@ def storeAddVolume(store_ip, volume_id):
     if volume_id <= 0:
         return None
 
-    store_conn = genStoreConn(store_ip, config.store_admin_port)
+    port = config.store_admin_port
+    store_conn = genStoreConn(store_ip, port)
     url = "/add_volume"
     value = {}
     value['vid'] = volume_id

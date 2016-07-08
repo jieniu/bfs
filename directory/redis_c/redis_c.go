@@ -138,10 +138,7 @@ func (r RedisClient) putNeedle(n *meta.Needle) (err error) {
 	return
 }
 
-func (r *RedisClient) Get(bucket, filename string) (n *meta.Needle, err error) {
-	var (
-		f *meta.File
-	)
+func (r *RedisClient) Get(bucket, filename string) (n *meta.Needle, f *meta.File, err error) {
 	if f, err = r.getFile(bucket, filename); err != nil {
 		return
 	}

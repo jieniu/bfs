@@ -10,7 +10,7 @@ def space():
 	# ips 机器的ip列表
 	# dirs 磁盘目录
 	# size 每块磁盘的空间大小
-	value = {"ips":"xx.xx.xx.xx, yy.yy.yy.yy","dirs":"/data1/bfsdata/,/data2/bfsdata/","size":"10T"}
+	value = {"ips":"10.10.191.7,10.10.191.8","dirs":"/data2/store1/","size":"40G"}
 
 	jdata = json.dumps(value)
 	req = urllib2.Request(url, jdata, headers = {"Content-type":"application/json"})
@@ -22,7 +22,7 @@ def groups():
 	# ips 要分组的ip列表
 	# copys 副本数（包括本身）
 	# racks 跨机架 默认1即可，具体请参考ops代码
-	value = {"ips":"xx.xx.xx.xx, yy.yy.yy.yy", "copys":2, "rack":1}
+	value = {"ips":"10.10.191.7,10.10.191.8", "copys":2, "rack":1}
 
 	jdata = json.dumps(value)
 	req = urllib2.Request(url, jdata, headers = {"Content-type":"application/json"})
@@ -33,7 +33,7 @@ def groups():
 def volumes():
 	url = 'http://127.0.0.1:9000/bfsops/volumes'
 	# groups 生效某个group
-	value = {"groups":"2"}
+	value = {"groups":"1"}
 
 	jdata = json.dumps(value)
 	req = urllib2.Request(url, jdata, headers = {"Content-type":"application/json"})
