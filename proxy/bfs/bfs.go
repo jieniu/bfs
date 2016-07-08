@@ -61,7 +61,7 @@ func New(c *conf.Config) (b *Bfs) {
 }
 
 // Get
-func (b *Bfs) Get(bucket, filename string) (src io.ReadCloser, ctlen int, mtime int64, sha1, mine string, err error) {
+func (b *Bfs) Get(bucket, filename string, ra *meta.Range) (src io.ReadCloser, ctlen int, mtime int64, sha1, mine string, err error) {
 	var (
 		i, ix, l int
 		uri      string
@@ -96,6 +96,16 @@ func (b *Bfs) Get(bucket, filename string) (src io.ReadCloser, ctlen int, mtime 
 		params.Set("key", strconv.FormatInt(res.Key, 10))
 		params.Set("cookie", strconv.FormatInt(int64(res.Cookie), 10))
 		params.Set("vid", strconv.FormatInt(int64(res.Vid), 10))
+		if ra.Start != 0 || ra.End != 0 {
+			var str_range string
+			if ra.End == 0 {
+				str_range = fmt.Sprintf("bytes=%d-", ra.Start)
+			} else {
+				str_range = fmt.Sprintf("bytes=%d-%d", ra.Start, ra.End)
+			}
+			log.Infof("str_range=%s", str_range)
+			params.Set("Range", str_range)
+		}
 		uri = fmt.Sprintf(_storeGetApi, res.Stores[(ix+i)%l]) + "?" + params.Encode()
 		if req, err = http.NewRequest("GET", uri, nil); err != nil {
 			continue

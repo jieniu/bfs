@@ -229,7 +229,16 @@ func (s *server) download(item *ibucket.Item, bucket, file string, wr http.Respo
 		_, err = wr.Write(byteJson)
 
 	} else if method == 1 {
-		if src, ctlen, mtime, sha1, mine, err = s.bfs.Get(bucket, filename); err != nil {
+		var str_range = r.Header.Get("Range")
+		var tr = &meta.Range{}
+		if err, status = tr.GetRange(str_range, tr); err != nil {
+			http.Error(wr, "", status)
+			return
+		}
+
+		log.Infof("range: start=%d, end=%d", tr.Start, tr.End)
+
+		if src, ctlen, mtime, sha1, mine, err = s.bfs.Get(bucket, filename, tr); err != nil {
 			if err == errors.ErrNeedleNotExist {
 				status = http.StatusNotFound
 			} else {
