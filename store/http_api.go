@@ -4,6 +4,7 @@ import (
 	"bfs/libs/errors"
 	"bfs/store/needle"
 	"bfs/store/volume"
+	"bfs/libs/meta"
 	log "github.com/golang/glog"
 	"mime/multipart"
 	"net/http"
@@ -42,12 +43,22 @@ func (s *Server) get(wr http.ResponseWriter, r *http.Request) {
 		ret              = http.StatusOK
 		params           = r.URL.Query()
 		now              = time.Now()
+        str_range string 
+        status int
 	)
 	if r.Method != "GET" && r.Method != "HEAD" {
 		ret = http.StatusMethodNotAllowed
 		http.Error(wr, "method not allowed", ret)
 		return
 	}
+    str_range = params.Get("Range")
+    var tr = &meta.Range{}
+    if err, status = tr.GetRange(str_range, tr); err != nil {
+		log.Errorf("get range error str_range=%s, err=%v", str_range, err)
+        ret = status
+        return
+    }
+    log.Infof("get range tr.Start=%d, tr.End=%d", tr.Start, tr.End)
 	defer HttpGetWriter(r, wr, now, &err, &ret)
 	if !s.rl.Allow() {
 		ret = http.StatusServiceUnavailable
@@ -68,10 +79,15 @@ func (s *Server) get(wr http.ResponseWriter, r *http.Request) {
 		ret = http.StatusBadRequest
 		return
 	}
+
+    if tr.End == 0 || tr.End > int(n.Size) {
+        tr.End = int(n.Size)
+    }
+
 	if v = s.store.Volumes[int32(vid)]; v != nil {
 		if n, err = v.Read(key, int32(cookie)); err == nil {
 			wr.Header().Set("Content-Length", strconv.Itoa(len(n.Data)))
-			if _, err = wr.Write(n.Data); err != nil {
+			if _, err = wr.Write(n.Data[tr.Start:tr.End]); err != nil {
 				log.Errorf("wr.Write() error(%v)", err)
 				err = nil // avoid HttpGetWriter write header twice
 			}
