@@ -1,21 +1,44 @@
 package meta
 
 import (
-	"bfs/libs/errors"
+	"fmt"
 	log "github.com/golang/glog"
 	"net/http"
 	"strconv"
 	"strings"
+	"xfs/libs/errors"
 )
 
 type Range struct {
-	Start int
-	End   int
+	Start int64
+	End   int64
 }
 
-func (r *Range) GetRange(str_range string, p_range *Range) (err error, status int) {
-	p_range.Start = 0
-	p_range.End = 0
+// if file is a bigfile, we should change the file range to the block range
+func (r *Range) ConvertRange(maxfilesize int64) (str_range string, err error) {
+	var (
+		block_index int64
+	)
+	if r.End < r.Start {
+		r.End = 0
+	}
+	block_index = r.Start / maxfilesize
+	if r.End == 0 {
+		r.End = maxfilesize - 1
+	} else {
+		r.End = r.End - maxfilesize*block_index
+	}
+	if r.End > maxfilesize-1 {
+		r.End = maxfilesize - 1
+	}
+	r.Start = r.Start - maxfilesize*block_index
+	str_range = fmt.Sprintf("bytes=%d-%d", r.Start, r.End)
+	return
+}
+
+func (r *Range) GetRange(str_range string) (err error, status int) {
+	r.Start = 0
+	r.End = 0
 	if str_range == "" {
 		return nil, http.StatusOK
 	} else {
@@ -33,24 +56,28 @@ func (r *Range) GetRange(str_range string, p_range *Range) (err error, status in
 			log.Errorf("invalid range param, %s", seps_2)
 			return err, http.StatusBadRequest
 		}
-		if p_range.Start, err = strconv.Atoi(seps_2[0]); err != nil {
+		if r.Start, err = strconv.ParseInt(seps_2[0], 10, 64); err != nil {
 			err = errors.ErrParam
 			log.Errorf("invalid range param, %s", seps_2)
 			return err, http.StatusBadRequest
 		}
 		if seps_2[1] != "" {
-			if p_range.End, err = strconv.Atoi(seps_2[1]); err != nil {
+			if r.End, err = strconv.ParseInt(seps_2[1], 10, 64); err != nil {
 				err = errors.ErrParam
 				log.Errorf("invalid range param, %s", seps_2)
 				return err, http.StatusBadRequest
 			}
 		}
 	}
-	if p_range.End != 0 && p_range.Start > p_range.End {
-		log.Errorf("invalid range param, Start[%d], End[%d]", p_range.Start, p_range.End)
+	if r.End != 0 && r.Start > r.End {
+		log.Errorf("invalid range param, Start[%d], End[%d]", r.Start, r.End)
 		err = errors.ErrParam
 		return err, http.StatusBadRequest
 	}
 
 	return nil, http.StatusOK
+}
+
+func (r *Range) GetSize() (size int64) {
+	return r.End - r.Start + 1
 }

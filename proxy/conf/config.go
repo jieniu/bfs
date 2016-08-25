@@ -13,12 +13,10 @@ import (
 type Config struct {
 	PprofEnable bool
 	PprofListen string
-	Redis       *Redis
+	Zookeeper   *Zookeeper
 
 	// api
 	HttpAddr string
-	// directory
-	BfsAddr string
 	// download domain
 	Domain string
 	// location prefix
@@ -27,10 +25,10 @@ type Config struct {
 	MaxFileSize int
 }
 
-type Redis struct {
-	Addr    string
-	MaxIdle int
-	Timeout int
+type Zookeeper struct {
+	Addr          []string
+	DirectoryRoot string
+	Timeout       int
 }
 
 // Code to implement the TextUnmarshaler interface for `duration`:

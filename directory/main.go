@@ -24,7 +24,7 @@ func main() {
 	flag.Parse()
 	defer log.Flush()
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	log.Infof("bfs directory start")
+	log.Infof("xfs directory start")
 	if c, err = conf.NewConfig(configFile); err != nil {
 		log.Errorf("NewConfig(\"%s\") error(%v)", configFile, err)
 		return

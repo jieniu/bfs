@@ -178,7 +178,7 @@ def bfsopsVolumesPost():
 		abort(400)
 	for group_id in groups:
 		if not GROUP_STORE.has_key(group_id):
-			logger.warn('group %s not in groups' % group_id)	
+			logger.warn('group %s not in groups' % group_id)
 			abort(400)
 
 	resp = {}
@@ -194,7 +194,7 @@ def bfsopsVolumesPost():
 		for store_id in stores:
 			if min_free_volume_id == 0 or min_free_volume_id > STORE_INFO[FREE_VOLUME_KEY+store_id]:
 				min_free_volume_id = STORE_INFO[FREE_VOLUME_KEY+store_id]
-		for i in range(min_free_volume_id-1):
+		for i in range(min_free_volume_id):
 			volume_id = MAX_VOLUME_ID + 1
 			for store_id in stores:
 				if not store_client.storeAddVolume(STORE_TO_IP[store_id], volume_id):

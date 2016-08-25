@@ -1,12 +1,12 @@
 package meta
 
 import (
-	"bfs/libs/errors"
 	"encoding/json"
 	"fmt"
 	log "github.com/golang/glog"
 	"io/ioutil"
 	"net/http"
+	"xfs/libs/errors"
 )
 
 const (

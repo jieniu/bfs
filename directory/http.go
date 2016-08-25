@@ -48,8 +48,7 @@ func HttpUploadWriter(r *http.Request, wr http.ResponseWriter, start time.Time, 
 		r.URL.Path, r.Form.Encode(), time.Now().Sub(start).Seconds(), ret)
 }
 
-// HttpDelWriter
-func HttpDelWriter(r *http.Request, wr http.ResponseWriter, start time.Time, res *meta.Response) {
+func HttpHeadWriter(r *http.Request, wr http.ResponseWriter, start time.Time, res interface{}) {
 	var (
 		err      error
 		byteJson []byte
@@ -64,6 +63,27 @@ func HttpDelWriter(r *http.Request, wr http.ResponseWriter, start time.Time, res
 		log.Errorf("HttpWriter Write error(%v)", err)
 		return
 	}
-	log.Infof("%s path:%s(params:%s,time:%f,ret:%v)", r.Method,
-		r.URL.Path, r.Form.Encode(), time.Now().Sub(start).Seconds(), ret)
+	log.Infof("%s path:%s(params:%s,time:%f)", r.Method,
+		r.URL.Path, r.Form.Encode(), time.Now().Sub(start).Seconds())
+}
+
+// HttpDelWriter
+func HttpWriter(r *http.Request, wr http.ResponseWriter, start time.Time, res interface{}) {
+	var (
+		err      error
+		byteJson []byte
+		n        int
+	)
+	if byteJson, err = json.Marshal(res); err != nil {
+		log.Errorf("json.Marshal(\"%v\") failed (%v)", res, err)
+		return
+	}
+	wr.Header().Set("Content-Type", "application/json;charset=utf-8")
+	if n, err = wr.Write(byteJson); err != nil {
+		log.Errorf("HttpWriter Write error(%v)", err)
+		return
+	}
+
+	log.Infof("%s path:%s(params:%s,time:%f,n:%d,json_len:%d)", r.Method,
+		r.URL.Path, r.Form.Encode(), time.Now().Sub(start).Seconds(), n, len(byteJson))
 }

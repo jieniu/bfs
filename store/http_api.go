@@ -43,22 +43,22 @@ func (s *Server) get(wr http.ResponseWriter, r *http.Request) {
 		ret              = http.StatusOK
 		params           = r.URL.Query()
 		now              = time.Now()
-        str_range string 
-        status int
+		str_range        string
+		status           int
 	)
 	if r.Method != "GET" && r.Method != "HEAD" {
 		ret = http.StatusMethodNotAllowed
 		http.Error(wr, "method not allowed", ret)
 		return
 	}
-    str_range = params.Get("Range")
-    var tr = &meta.Range{}
-    if err, status = tr.GetRange(str_range, tr); err != nil {
+	str_range = params.Get("Range")
+	var tr = &meta.Range{}
+	if err, status = tr.GetRange(str_range); err != nil {
 		log.Errorf("get range error str_range=%s, err=%v", str_range, err)
-        ret = status
-        return
-    }
-    log.Infof("get range tr.Start=%d, tr.End=%d", tr.Start, tr.End)
+		ret = status
+		return
+	}
+	//log.Infof("get range tr.Start=%d, tr.End=%d", tr.Start, tr.End)
 	defer HttpGetWriter(r, wr, now, &err, &ret)
 	if !s.rl.Allow() {
 		ret = http.StatusServiceUnavailable
@@ -80,14 +80,13 @@ func (s *Server) get(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-    if tr.End == 0 || tr.End > int(n.Size) {
-        tr.End = int(n.Size)
-    }
-
 	if v = s.store.Volumes[int32(vid)]; v != nil {
 		if n, err = v.Read(key, int32(cookie)); err == nil {
-			wr.Header().Set("Content-Length", strconv.Itoa(len(n.Data)))
-			if _, err = wr.Write(n.Data[tr.Start:tr.End]); err != nil {
+			if tr.End == 0 || tr.End > int64(n.Size)-1 {
+				tr.End = int64(n.Size) - 1
+			}
+			wr.Header().Set("Content-Length", strconv.Itoa(len(n.Data[tr.Start:tr.End+1])))
+			if _, err = wr.Write(n.Data[tr.Start : tr.End+1]); err != nil {
 				log.Errorf("wr.Write() error(%v)", err)
 				err = nil // avoid HttpGetWriter write header twice
 			}
@@ -128,9 +127,11 @@ func (s *Server) upload(wr http.ResponseWriter, r *http.Request) {
 		err = errors.ErrServiceUnavailable
 		return
 	}
-	if err = checkContentLength(r, s.conf.NeedleMaxSize); err != nil {
-		return
-	}
+	/*
+		if err = checkContentLength(r, s.conf.NeedleMaxSize); err != nil {
+			return
+		}
+	*/
 	str = r.FormValue("vid")
 	if vid, err = strconv.ParseInt(str, 10, 32); err != nil {
 		log.Errorf("strconv.ParseInt(\"%s\") error(%v)", str, err)
@@ -159,6 +160,8 @@ func (s *Server) upload(wr http.ResponseWriter, r *http.Request) {
 			n = needle.NewWriter(key, int32(cookie), int32(size))
 			if err = n.ReadFrom(file); err == nil {
 				err = v.Write(n)
+			} else {
+				log.Errorf("Read err: file [%v], err [%v]", file, err)
 			}
 			n.Close()
 		} else {

@@ -29,7 +29,7 @@ func main() {
 	)
 	flag.Parse()
 	defer log.Flush()
-	log.Infof("bfs proxy [version: %s] start", version)
+	log.Infof("xfs proxy [version: %s] start", version)
 	if c, err = conf.NewConfig(configFile); err != nil {
 		log.Errorf("NewConfig(\"%s\") error(%v)", configFile, err)
 		panic(err)

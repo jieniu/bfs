@@ -17,6 +17,7 @@ type Config struct {
 	ApiListen   string
 	PprofEnable bool
 	PprofListen string
+	MaxFileSize int64
 }
 
 type Snowflake struct {
@@ -27,12 +28,13 @@ type Snowflake struct {
 }
 
 type Zookeeper struct {
-	Addrs        []string
-	Timeout      duration
-	PullInterval duration
-	VolumeRoot   string
-	StoreRoot    string
-	GroupRoot    string
+	Addrs         []string
+	Timeout       duration
+	PullInterval  duration
+	VolumeRoot    string
+	StoreRoot     string
+	GroupRoot     string
+	DirectoryRoot string
 }
 
 type HBase struct {

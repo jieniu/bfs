@@ -10,10 +10,13 @@ PprofEnable = true
 # pprof http addr
 PprofListen = "localhost:6066"
 
+# max file size
+MaxFileSize = 41943040
+
 [snowflake]
 # zookeeper cluster addrs, multiple addrs split by ",".
 ZkAddrs = [
-    "localhost:2183"
+    "10.10.191.8:2183"
 ]
 
 # path
@@ -28,7 +31,7 @@ WorkId = 0
 [zookeeper]
 # zookeeper cluster addrs, multiple addrs split by ",".
 Addrs = [
-    "localhost:2183"
+    "10.10.191.8:2183"
 ]
 
 # zookeeper heartbeat timeout.
@@ -46,6 +49,9 @@ GroupRoot = "/group"
 # zookeeper pullinterval
 PullInterval = "10s"
 
+# directoryroot node
+DirectoryRoot = "/directory"
+
 [hbase]
 # addr 172.16.13.90:9090
 Addr = "172.16.13.90:9090"
@@ -61,7 +67,7 @@ Timeout = "1s"
 
 [redis]
 # redis address
-Addr = "localhost:6379"
+Addr = "10.10.191.7:8888"
 
 # max idle connection in pool
 MaxIdle = 100

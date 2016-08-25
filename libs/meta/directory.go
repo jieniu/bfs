@@ -16,3 +16,25 @@ type Response struct {
 	Sha1   string   `json:"sha1"`
 	Mine   string   `json:"mine"`
 }
+
+type ResponseList struct {
+	Ret          int
+	ResponseList []Response
+}
+
+type DirInfo struct {
+	Dir     string
+	Files   []string
+	SubDirs []string
+}
+
+type FileSizeInfo struct {
+	Filename string
+	Filesize int64
+}
+
+type ResponseHeadInfo struct {
+	Ret          int
+	FileSizeInfo FileSizeInfo
+	Dir          DirInfo
+}

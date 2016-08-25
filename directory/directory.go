@@ -12,6 +12,7 @@ import (
 	log "github.com/golang/glog"
 	"github.com/samuel/go-zookeeper/zk"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -52,8 +53,8 @@ func NewDirectory(config *conf.Config) (d *Directory, err error) {
 	if d.genkey, err = snowflake.NewGenkey(config.Snowflake.ZkAddrs, config.Snowflake.ZkPath, config.Snowflake.ZkTimeout.Duration, config.Snowflake.WorkId); err != nil {
 		return
 	}
-	d.redis_c = redis_c.NewRedisClient()
-	if err = redis_c.Init(config); err != nil {
+	d.redis_c, err = redis_c.NewRedisClient(config.Redis.MaxIdle, config.Redis.Timeout, config.Redis.Addr)
+	if err != nil {
 		return
 	}
 	d.dispatcher = NewDispatcher()
@@ -137,8 +138,8 @@ func (d *Directory) syncVolumes() (err error) {
 		}
 		volumeState = new(meta.VolumeState)
 		if err = json.Unmarshal(data, volumeState); err != nil {
-			log.Errorf("json.Unmarshal() error(%v)", err)
-			return
+			log.Errorf("json.Unmarshal() error(%v), volumestr(%v)", err, str)
+			continue
 		}
 		if vid, err = strconv.Atoi(str); err != nil {
 			log.Errorf("wrong volume:%s", str)
@@ -147,7 +148,8 @@ func (d *Directory) syncVolumes() (err error) {
 		volume[int32(vid)] = volumeState
 		// get the stores by the volume
 		if stores, err = d.zk.VolumeStores(str); err != nil {
-			return
+			log.Errorf("get stores by the volumes failed (%v), err(%v)", str, err)
+			continue
 		}
 		volumeStore[int32(vid)] = stores
 	}
@@ -234,13 +236,22 @@ func (d *Directory) cookie() (cookie int32) {
 }
 
 // GetStores get readable stores for http get
-func (d *Directory) GetStores(bucket, filename string) (n *meta.Needle, f *meta.File, stores []string, err error) {
+func (d *Directory) GetStores(bucket, filename string, tr *meta.Range) (n *meta.Needle, f *meta.File, stores []string, err error) {
 	var (
-		store     string
-		svrs      []string
-		storeMeta *meta.Store
-		ok        bool
+		store       string
+		svrs        []string
+		storeMeta   *meta.Store
+		ok          bool
+		start_block int64
+		end_block   int64
+		block_name  string
 	)
+
+	if tr.GetSize() > d.config.MaxFileSize {
+		err = errors.ErrFileTooLarge
+		return
+	}
+
 	if n, f, err = d.redis_c.Get(bucket, filename); err != nil {
 		log.Errorf("redis_c.Get error(%v)", err)
 		if err != errors.ErrNeedleNotExist {
@@ -248,9 +259,29 @@ func (d *Directory) GetStores(bucket, filename string) (n *meta.Needle, f *meta.
 		}
 		return
 	}
-	if n == nil {
-		err = errors.ErrNeedleNotExist
-		return
+	// check range size
+	if tr.End == 0 || tr.End > f.Filesize-1 {
+		tr.End = f.Filesize - 1
+	}
+
+	// check large file valid
+	if len(f.Chunks) > 0 {
+		// start block num
+		start_block = tr.Start / d.config.MaxFileSize
+		end_block = tr.End / d.config.MaxFileSize
+		if start_block != end_block {
+			err = errors.ErrFileTooLarge
+			log.Errorf("span two blocks")
+			return
+		}
+		block_name = f.Chunks[start_block].Filename
+		if n, f, err = d.redis_c.Get(bucket, block_name); err != nil {
+			log.Errorf("redis_c.Get error(%v)", err)
+			if err != errors.ErrNeedleNotExist {
+				err = errors.ErrRedis
+			}
+			return
+		}
 	}
 	if svrs, ok = d.volumeStore[n.Vid]; !ok {
 		err = errors.ErrZookeeperDataError
@@ -317,6 +348,110 @@ func (d *Directory) UploadStores(bucket string, f *meta.File) (n *meta.Needle, s
 	return
 }
 
+func (d *Directory) DelDirectory(bucket, dir string, reslist *meta.ResponseList) (err error) {
+	parent, _ := util.GetParentDir(dir)
+	sub := dir[len(parent):]
+	defer d.redis_c.DelDirSubitem(bucket, parent, sub)
+	log.Infof("del item parent dir(%v), subdir(%v)", parent, dir)
+	// get all sub_dirs
+	var dir_meta = meta.DirInfo{}
+	dir_meta, err = d.redis_c.GetDirInfo(bucket, dir)
+	if err != nil {
+		return err
+	}
+
+	for _, subdir := range dir_meta.SubDirs {
+		err = d.DelDirectory(bucket, dir+subdir, reslist)
+		if err != nil {
+			log.Errorf("DelDirectory failed, subdir=%s", dir+subdir)
+		}
+	}
+	// get all files
+	for _, file := range dir_meta.Files {
+		filepath := dir + file
+		d.DelFile(bucket, filepath, reslist)
+	}
+	return nil
+}
+
+func (d *Directory) DelFile(bucket, filepath string, reslist *meta.ResponseList) (err error) {
+	// get dir and subitem
+	pos := strings.LastIndex(filepath, "/")
+	dir := filepath[:pos+1]
+	filename := filepath[pos+1:]
+	defer d.redis_c.DelDirSubitem(bucket, dir, filename)
+
+	n, f, err := d.redis_c.Get(bucket, filepath)
+	if err != nil {
+		return err
+	}
+
+	if len(f.Chunks) > 0 {
+		// big file
+		for _, chunk := range f.Chunks {
+			n, f, err := d.redis_c.Get(bucket, chunk.Filename)
+			if err != nil {
+				log.Warningf("can not find file %s", chunk.Filename)
+				continue
+			} else {
+				d.addResp(n, f, reslist)
+			}
+			d.redis_c.Del(bucket, chunk.Filename)
+		}
+		d.redis_c.Del(bucket, filepath)
+	} else {
+		d.addResp(n, f, reslist)
+		// delete file, meta+needle item
+		d.redis_c.Del(bucket, filepath)
+	}
+
+	return nil
+}
+
+func (d *Directory) addResp(n *meta.Needle, f *meta.File, reslist *meta.ResponseList) (err error) {
+	var res = meta.Response{}
+	var (
+		svrs      []string
+		ok        bool
+		store     string
+		storeMeta *meta.Store
+	)
+	res.Ret = errors.RetOK
+	res.Key = f.Key
+	res.Cookie = n.Cookie
+	res.Vid = n.Vid
+	res.MTime = f.MTime
+	res.Sha1 = f.Sha1
+	res.Mine = f.Mine
+
+	if svrs, ok = d.volumeStore[n.Vid]; !ok {
+		err = errors.ErrZookeeperDataError
+		log.Errorf("zookeeper data error, %v", err)
+		res.Ret = errors.RetZookeeperDataError
+		reslist.ResponseList = append(reslist.ResponseList, res)
+		return
+	}
+	res.Stores = make([]string, 0, len(svrs))
+	for _, store = range svrs {
+		if storeMeta, ok = d.store[store]; !ok {
+			err = errors.ErrZookeeperDataError
+			res.Ret = errors.RetZookeeperDataError
+			log.Errorf("zookeeper data error, %v", err)
+			reslist.ResponseList = append(reslist.ResponseList, res)
+			return
+		}
+		if !storeMeta.CanWrite() {
+			err = errors.ErrStoreNotAvailable
+			res.Ret = errors.RetStoreNotAvailable
+			reslist.ResponseList = append(reslist.ResponseList, res)
+			return
+		}
+		res.Stores = append(res.Stores, storeMeta.Api)
+	}
+	reslist.ResponseList = append(reslist.ResponseList, res)
+	return nil
+}
+
 // DelStores get delable stores for http del
 func (d *Directory) DelStores(bucket, filename string) (n *meta.Needle, stores []string, err error) {
 	var (
@@ -326,7 +461,7 @@ func (d *Directory) DelStores(bucket, filename string) (n *meta.Needle, stores [
 		storeMeta *meta.Store
 	)
 	if n, _, err = d.redis_c.Get(bucket, filename); err != nil {
-		log.Errorf("hBase.Get error(%v)", err)
+		log.Errorf("ssdb.Get error(%v)", err)
 		if err != errors.ErrNeedleNotExist {
 			err = errors.ErrHBase
 		}

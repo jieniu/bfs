@@ -50,6 +50,11 @@ func (d *Dispatcher) Update(group map[int][]string,
 		volumeState                *meta.VolumeState
 	)
 	gids = []int{}
+
+	if len(group) == 0 {
+		log.Warningf("not any available group")
+	}
+
 	for gid, stores = range group {
 		write = true
 		// check all stores can writeable by the group.
@@ -89,30 +94,46 @@ func (d *Dispatcher) Update(group map[int][]string,
 				minScore = score
 			}
 		}
+		if minScore < 1 {
+			log.Warningf("minScore = %d, group [%d] will not available", minScore, gid)
+		}
 		for i = 0; i < minScore; i++ {
 			gids = append(gids, gid)
 		}
 	}
 	d.gids = gids
+	if len(d.gids) == 0 {
+		log.Warningf("no group available, gids length = %d", len(d.gids))
+
+	}
 	return
 }
 
 // cal_score algorithm of calculating score
 func (d *Dispatcher) calScore(totalAdd, totalAddDelay, restSpace int) (score int) {
 	var (
-		rsScore, adScore int
+		rsScore float64
+		adScore int
 	)
 	rsScore = (restSpace / int(spaceBenchmark))
 	if rsScore > maxScore {
 		rsScore = maxScore // more than 32T will be 32T and set score maxScore; less than 32G will be set 0 score;
 	}
+	var weight = 1.0
 	if totalAdd != 0 {
 		adScore = (((totalAddDelay / nsToMs) / totalAdd) / addDelayBenchmark) * baseAddDelay
 		if adScore > maxScore {
-			adScore = maxScore // more than 1s will be 1s and set score -maxScore; less than 100ms will be set -0 score;
+			//adScore = maxScore // more than 1s will be 1s and set score -maxScore; less than 100ms will be set -0 score;
+			log.Warningf("avg add delay > 1s, then low the weight to 0.5")
+			weight = 0.5
+		} else if adScore > baseAddDelay {
+			weight = 0.8
 		}
 	}
-	score = rsScore - adScore
+	score = int(rsScore * weight)
+	if score < 1 {
+		log.Warningf("rsScore=%v, adScore=%v, weight=%v", rsScore, adScore, weight)
+	}
 	return
 }
 

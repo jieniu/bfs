@@ -19,21 +19,26 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"xfs/libs/errors"
+	"xfs/libs/meta"
+	"xfs/proxy/auth"
+	"xfs/proxy/bfs"
+	ibucket "xfs/proxy/bucket"
+	"xfs/proxy/conf"
 
 	log "github.com/golang/glog"
 )
 
 const (
-	_httpServerReadTimeout  = 5 * time.Second
-	_httpServerWriteTimeout = 2 * time.Second
+	_httpServerReadTimeout  = 10 * time.Second
+	_httpServerWriteTimeout = 10 * time.Second
 )
 
 type server struct {
-	bfs     *bfs.Bfs
-	bucket  *ibucket.Bucket
-	auth    *auth.Auth
-	c       *conf.Config
-	redis_c *redis_c.RedisClient
+	bfs    *bfs.Bfs
+	bucket *ibucket.Bucket
+	auth   *auth.Auth
+	c      *conf.Config
 }
 
 // StartApi init the http module.
@@ -41,10 +46,6 @@ func StartApi(c *conf.Config) (err error) {
 	var s = &server{}
 	s.c = c
 	s.bfs = bfs.New(c)
-	s.redis_c = redis_c.NewRedisClient()
-	if err = redis_c.Init(c); err != nil {
-		return
-	}
 	if s.bucket, err = ibucket.New(); err != nil {
 		return
 	}
@@ -53,7 +54,8 @@ func StartApi(c *conf.Config) (err error) {
 	}
 	go func() {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/", s.do)
+		mux.HandleFunc("/file", s.do)
+		mux.HandleFunc("/fileinfo", s.info)
 		mux.HandleFunc("/ping", s.ping)
 		server := &http.Server{
 			Addr:         c.HttpAddr,
@@ -70,6 +72,42 @@ func StartApi(c *conf.Config) (err error) {
 
 type handler func(*ibucket.Item, string, string, http.ResponseWriter, *http.Request)
 
+func (s *server) info(wr http.ResponseWriter, r *http.Request) {
+	var (
+		h      handler
+		bucket string
+		item   *ibucket.Item
+		err    error
+		status int
+		file   string
+		upload = false
+	)
+	switch r.Method {
+	case "GET":
+		h = s.head
+	case "POST":
+		h = s.putInfo
+		upload = true
+	default:
+		http.Error(wr, "", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if bucket, file, status = s.parseURI(r, upload); status != http.StatusOK {
+		http.Error(wr, "", status)
+		return
+	}
+
+	if item, err = s.bucket.Get(bucket); err != nil {
+		log.Errorf("bucket.Get(%s) error(%v)", bucket, err)
+		http.Error(wr, "", http.StatusNotFound)
+		return
+	}
+	h(item, bucket, file, wr, r)
+	return
+
+}
+
 func (s *server) do(wr http.ResponseWriter, r *http.Request) {
 	var (
 		bucket string
@@ -83,11 +121,11 @@ func (s *server) do(wr http.ResponseWriter, r *http.Request) {
 		read   = false
 	)
 	switch r.Method {
-	case "HEAD", "GET":
+	case "GET":
 		// TODO get filesize or download file
 		h = s.download
 		read = true
-	case "PUT", "POST":
+	case "POST":
 		h = s.upload
 		upload = true
 	case "DELETE":
@@ -134,6 +172,7 @@ func setCode(wr http.ResponseWriter, status *int) {
 // parseURI get uri's bucket and filename.
 func (s *server) parseURI(r *http.Request, upload bool) (bucket, file string, status int) {
 	var b, e int
+	var path = r.URL.Query().Get("path")
 	status = http.StatusOK
 	if s.c.Prefix == "" {
 		// uri: /bucket/file...
@@ -142,22 +181,22 @@ func (s *server) parseURI(r *http.Request, upload bool) (bucket, file string, st
 	} else {
 		// uri: /prefix/bucket/file...
 		//             [len(prefix):
-		if !strings.HasPrefix(r.URL.Path, s.c.Prefix) {
-			log.Errorf("parseURI(%s) error, no prefix: %s", r.URL.Path, s.c.Prefix)
+		if !strings.HasPrefix(path, s.c.Prefix) {
+			log.Errorf("parseURI(%s) error, no prefix: %s", path, s.c.Prefix)
 			status = http.StatusBadRequest
 			return
 		}
 		b = len(s.c.Prefix)
 	}
-	if e = strings.Index(r.URL.Path[b:], "/"); e < 1 {
-		bucket = r.URL.Path[b:]
+	if e = strings.Index(path[b:], "/"); e < 1 {
+		bucket = path[b:]
 		file = ""
 	} else {
-		bucket = r.URL.Path[b : b+e]
-		file = r.URL.Path[b+e+1:] // skip "/"
+		bucket = path[b : b+e]
+		file = path[b+e:] // not skip "/"
 	}
 	if bucket == "" || (file == "" && !upload) {
-		log.Errorf("parseURI(%s) error, bucket: %s or file: %s empty", r.URL.Path, bucket, file)
+		log.Errorf("parseURI(%s) error, bucket: %s or file: %s empty", path, bucket, file)
 		status = http.StatusBadRequest
 	}
 	return
@@ -170,100 +209,78 @@ func (s *server) getURI(bucket, file string) (uri string) {
 	return
 }
 
+func (s *server) head(item *ibucket.Item, bucket, file string, wr http.ResponseWriter, r *http.Request) {
+	var (
+		byte_json []byte
+		err       error
+		status    int
+		start     = time.Now()
+	)
+	defer httpLog("head", r.URL.Path, &bucket, &file, start, &status, &err)
+
+	byte_json, err = s.bfs.Head(bucket, file)
+	if err == errors.ErrNeedleNotExist {
+		status = http.StatusNotFound
+	} else if err != nil {
+		status = http.StatusInternalServerError
+	} else {
+		status = http.StatusOK
+	}
+
+	wr.Header().Set("Code", strconv.Itoa(status))
+	wr.Header().Set("Content-Type", "application/json;charset=utf-8")
+	wr.Header().Set("Content-Length", strconv.Itoa(len(byte_json)))
+	wr.WriteHeader(status)
+	wr.Write(byte_json)
+}
+
 // download.
 func (s *server) download(item *ibucket.Item, bucket, file string, wr http.ResponseWriter, r *http.Request) {
 	var (
-		err      error
-		start    = time.Now()
-		status   = http.StatusOK
-		ind      int
-		method   int
-		filename string
-		mtime    int64
-		ctlen    int
-		mine     string
-		sha1     string
-		src      io.ReadCloser
+		err    error
+		start  = time.Now()
+		status = http.StatusOK
+		mtime  int64
+		ctlen  int
+		mine   string
+		sha1   string
+		src    io.ReadCloser
+		uerr   errors.Error
+		ok     bool
 	)
 	defer httpLog("download", r.URL.Path, &bucket, &file, start, &status, &err)
 
-	ind = strings.Index(file, "/")
-	if ind < 0 {
-		log.Errorf("bad url, %s", file)
-		status = http.StatusBadRequest
+	var str_range = r.Header.Get("Range")
+	var tr = &meta.Range{}
+	if err, status = tr.GetRange(str_range); err != nil {
 		http.Error(wr, "", status)
 		return
 	}
-	if method, err = strconv.Atoi(file[:ind]); err != nil {
-		status = http.StatusBadRequest
-		log.Errorf("str atoi error, %v", err)
-		http.Error(wr, "", status)
+	if tr.End >= tr.Start && tr.End-tr.Start > int64(s.c.MaxFileSize) {
+		http.Error(wr, "", http.StatusRequestEntityTooLarge)
 		return
 	}
-	filename = file[ind+1:]
 
-	// 0 = get size; 1 = get content
-	if method == 0 {
-		var f *meta.File
-		var result = make(map[string]interface{})
-		var byteJson []byte
-		if f, err = s.redis_c.GetFile(bucket, filename); err != nil {
-			if err == errors.ErrNeedleNotExist {
-				status = http.StatusNotFound
-				http.Error(wr, "", status)
-				return
-			} else {
-				log.Errorf("redis get meta failed, %v", err)
-				status = http.StatusInternalServerError
-				http.Error(wr, "", status)
-				return
-			}
-		}
-		result["filesize"] = f.Filesize
-		if byteJson, err = json.Marshal(result); err != nil {
-			log.Error("json.Marshal(%v) failed (%v)", result, err)
-			return
-		}
-		wr.Header().Set("Code", strconv.Itoa(status))
-		wr.Header().Set("Content-Type", "application/json;charset=utf-8")
-		_, err = wr.Write(byteJson)
-
-	} else if method == 1 {
-		var str_range = r.Header.Get("Range")
-		var tr = &meta.Range{}
-		if err, status = tr.GetRange(str_range, tr); err != nil {
-			http.Error(wr, "", status)
-			return
-		}
-
-		log.Infof("range: start=%d, end=%d", tr.Start, tr.End)
-
-		if src, ctlen, mtime, sha1, mine, err = s.bfs.Get(bucket, filename, tr); err != nil {
-			if err == errors.ErrNeedleNotExist {
-				status = http.StatusNotFound
-			} else {
-				status = http.StatusInternalServerError
-			}
-			http.Error(wr, "", status)
+	if src, ctlen, mtime, sha1, mine, err = s.bfs.Get(bucket, file, tr); err != nil {
+		if uerr, ok = (err).(errors.Error); ok {
+			status = int(uerr)
 		} else {
-			wr.Header().Set("Content-Type", mine)
-			wr.Header().Set("Content-Length", strconv.Itoa(ctlen))
-			wr.Header().Set("Server", "xfs")
-			wr.Header().Set("Last-Modified", time.Unix(0, mtime).Format(http.TimeFormat))
-			wr.Header().Set("Etag", sha1)
-			wr.Header().Set("Code", strconv.Itoa(status))
-			if src != nil {
-				if r.Method == "GET" {
-					io.Copy(wr, src)
-				}
-				src.Close()
-			}
+			status = http.StatusInternalServerError
 		}
-	} else {
-		status = http.StatusBadRequest
-		log.Errorf("method invalid %d", method)
 		http.Error(wr, "", status)
-		return
+	} else {
+		wr.Header().Set("Content-Type", mine)
+		wr.Header().Set("Content-Length", strconv.Itoa(ctlen))
+		wr.Header().Set("Server", "xfs")
+		wr.Header().Set("Last-Modified", time.Unix(0, mtime).Format(http.TimeFormat))
+		wr.Header().Set("Etag", sha1)
+		wr.Header().Set("Code", strconv.Itoa(status))
+		if src != nil {
+			if r.Method == "GET" {
+				io.Copy(wr, src)
+			}
+			src.Close()
+		}
 	}
 
 	return
@@ -294,7 +311,6 @@ func retCode(wr http.ResponseWriter, status *int, reterr *error) {
 		log.Errorf("http write error %v", err)
 		return
 	}
-	log.Infof("ret code status %v", *status)
 }
 
 // upload upload file.
@@ -337,7 +353,57 @@ func (s *server) upload(item *ibucket.Item, bucket, file string, wr http.Respons
 	if file == "" || strings.HasSuffix(file, "/") {
 		file += sha1sum + "." + ext
 	}
-	if err = s.bfs.Upload(bucket, file, mine, sha1sum, body); err != nil && err != errors.ErrNeedleExist {
+	if err = s.bfs.Upload(bucket, file, mine, sha1sum, body); err != nil {
+		if uerr, ok = (err).(errors.Error); ok {
+			status = int(uerr)
+		} else {
+			status = http.StatusInternalServerError
+		}
+		return
+	}
+	location = s.getURI(bucket, file)
+	wr.Header().Set("Location", location)
+	wr.Header().Set("ETag", sha1sum)
+	return
+}
+
+// upload upload file.
+func (s *server) putInfo(item *ibucket.Item, bucket, file string, wr http.ResponseWriter, r *http.Request) {
+	var (
+		ok       bool
+		body     []byte
+		mime     string
+		location string
+		sha1sum  string
+		sha      [sha1.Size]byte
+		err      error
+		uerr     errors.Error
+		status   = http.StatusOK
+		start    = time.Now()
+	)
+	defer httpLog("putInfo", r.URL.Path, &bucket, &file, start, &status, &err)
+	defer retCode(wr, &status, &err)
+	if file == "" || strings.HasSuffix(file, "/") {
+		status = http.StatusBadRequest
+		return
+	}
+	if mime = r.Header.Get("Content-Type"); mime == "" {
+		status = http.StatusBadRequest
+		return
+	}
+	if body, err = ioutil.ReadAll(r.Body); err != nil {
+		status = http.StatusBadRequest
+		log.Errorf("ioutil.ReadAll(r.Body) error(%s)", err)
+		return
+	}
+	r.Body.Close()
+	if len(body) > s.c.MaxFileSize {
+		status = http.StatusRequestEntityTooLarge
+		return
+	}
+	sha = sha1.Sum(body)
+	sha1sum = hex.EncodeToString(sha[:])
+	if err = s.bfs.PutInfo(bucket, file, mime, sha1sum, body); err != nil && err != errors.ErrNeedleExist {
 		if uerr, ok = (err).(errors.Error); ok {
 			status = int(uerr)
 		} else {
@@ -362,9 +428,8 @@ func (s *server) delete(item *ibucket.Item, bucket, file string, wr http.Respons
 	)
 	defer httpLog("delete", r.URL.Path, &bucket, &file, start, &status, &err)
 	if err = s.bfs.Delete(bucket, file); err != nil {
-		if err == errors.ErrNeedleNotExist {
+		if err == errors.ErrNeedleNotExist || err == errors.ErrDirNotExist {
 			status = http.StatusNotFound
-			//http.Error(wr, "", status)
 		} else {
 			if uerr, ok = (err).(errors.Error); ok {
 				status = int(uerr)

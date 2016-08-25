@@ -92,7 +92,9 @@ func checkFileSize(file multipart.File, maxSize int) (size int64, err error) {
 		}
 		size = fi.Size()
 	}
+	log.Infof("upload file size = %d", size)
 	if size > int64(maxSize) {
+		log.Errorf("size=%d, maxSize=%d", size, maxSize)
 		err = errors.ErrNeedleTooLarge
 	}
 	return
@@ -106,6 +108,7 @@ func checkContentLength(r *http.Request, maxSize int) (err error) {
 		return
 	}
 	if size > int64(maxSize) {
+		log.Errorf("size=%d, maxSize=%d", size, maxSize)
 		err = errors.ErrNeedleTooLarge
 	}
 	return

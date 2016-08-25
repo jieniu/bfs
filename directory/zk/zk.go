@@ -23,6 +23,12 @@ func NewZookeeper(config *conf.Config) (z *Zookeeper, err error) {
 		log.Errorf("zk.Connect(\"%v\") error(%v)", config.Zookeeper.Addrs, err)
 		return
 	}
+
+	err = z.registerNode(config.Zookeeper.DirectoryRoot, config.ApiListen)
+	if err != nil {
+		return nil, err
+	}
+
 	go func() {
 		var e zk.Event
 		for {
@@ -33,6 +39,24 @@ func NewZookeeper(config *conf.Config) (z *Zookeeper, err error) {
 		}
 	}()
 	return
+}
+
+func (z *Zookeeper) registerNode(root string, api string) error {
+	// create root
+	_, err := z.c.Create(root, []byte(""), 0, zk.WorldACL(zk.PermAll))
+	if err != nil && err != zk.ErrNodeExists {
+		log.Errorf("create zk node (%v) failed: %v", root, err)
+		return err
+	}
+	// create directory node
+	_, err = z.c.Create(path.Join(root, "/", "")+"/", []byte(api), int32(zk.FlagEphemeral|zk.FlagSequence), zk.WorldACL(zk.PermAll))
+	if err != nil {
+		log.Errorf("create directory node (%v) failed: %v", path.Join(root, "/", ""), err)
+		return err
+	}
+
+	return nil
+
 }
 
 // WatchRacks get all racks and watch
