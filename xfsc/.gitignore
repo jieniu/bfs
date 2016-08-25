@@ -1,0 +1,16 @@
+# commonly used editors
+# vim
+*.swp
+tags
+
+# OS X
+.DS_Store
+
+# generated files etc
+*.[oa]
+*.l[oa]
+*.so
+*.dll
+src/depends/
+src/_tmp/
+xfsc_test
